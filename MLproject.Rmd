@@ -1,0 +1,126 @@
+---
+title: "Practical Machine Learning - Barbell Lift Prediction"
+author: "Wei Hsien Yeh"
+date: "April 25, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Synopsis  
+    
+In order to train effectively and prevent injury, one not only has to control the length and repetition of physical activity performed, but also its quality.  Currently, the quality of physical activity performed (e.g. baseball throwing motion) could only be determined by human experts.  Although there are increasing number of wearable devices that are designed to track one???s physical activity, devices on the market today could only monitor the length and repetition of motion performed, but not the quality of each motion.  Unfortunately, the complexity of human motion and the variety of training activities make it nearly impossible for us to build mathematical models into devices to determine the quality of the activity performed.  We know that sensors on wearable devices are capable or tracking data with much higher accuracy in higher frequency today than in the past.  With larger amount of data available to our disposal today, applying machine learning algorithms on the dataset might be able to help us 1) predict the quality of the motion and 2) determine important variables for predictions.  In this report, we applied the decision tree and random forest methods to dataset collected from 6 participants performing barbell lifts in 5 different ways (1 correct and 4 incorrect) while wearing 3 accelerometer (on belt, forearm, and arm).  Before training the data set using machine learning methods, we split data from the pml-training.csv file into 60% training and 40% validation set.  We found that the most accurate model from the ones we have tested is the random forest method, which yielded 99.7% accuracy on our validation set when predicting the way each barbell lift was performed.  Fifty-seven predictor variables were used in the final model.        
+
+## Data Used
+
+Six participants performed barbell lifts in 6 different ways, categorized as class A (exactly according to the specification), B (throwing the elbows to the front), C (lifting the dumbbell only halfway), D (lowering the dumbbell only halfway), and E (throwing the hips to the front).  Accelerometer data were collect from 3 sensors (at belt, forearm, and arm) wore by each participant.  
+
+## Loading Data into R    
+
+Before everything, load the following libraries:    
+```{r}
+library(AppliedPredictiveModeling)
+library(caret)
+library(randomForest)
+```
+
+Then, load data into R:    
+```{r}
+path <- getwd()
+training.path <- paste(path, "/data/MLproject/pml-training.csv", sep = "")
+testing.path <- paste(path, "/data/MLproject/pml-testing.csv", sep = "")
+
+raw.training <- read.csv(training.path, na.strings = c("", "NA", "#DIV/0!"))
+raw.testing <- read.csv(testing.path, na.strings = c("", "NA", "#DIV/0!"))
+```  
+
+## Selecting Predictors and Preprocessing
+
+Firstly, there are many columns with a lot of NA cells.  Predictors with greater than 90% of missing values were removed.    
+```{r}
+col.num <- ncol(raw.training)
+row.num <- nrow(raw.training)
+na.vector <- c()
+for(i in 1:col.num){
+    na.vector <- c(na.vector, (ifelse((sum(is.na(raw.training[,i])) / row.num) < 0.9, "good", i)))
+}
+na.vector <- subset(na.vector, na.vector != "good")
+na.vector <- as.numeric(na.vector)
+training.na.rm <- raw.training[,-c(1, na.vector)] # remove columns with excessive NA for the training set
+testing.na.rm <- raw.testing[, -c(1, na.vector, 160)] # remove columns with excessive NA for the testing set
+```
+
+Then, we identified and removed columns that have near-zero variance data.  
+```{r}
+nzv <- nearZeroVar(training.na.rm, saveMetrics = TRUE)
+nzv.col <- which(nzv$nzv == TRUE)
+filtered.training <- training.na.rm[, -c(1, 4, nzv.col)]
+filtered.testing <- testing.na.rm[, -c(1, 4, nzv.col)]
+```
+```{r}
+nzv
+```
+
+Final dataset has the following variables:  
+```{r, echo=FALSE}
+colnames(filtered.training)
+```
+
+Before applying machine learning algorithm to the dataset, we split the data into two sets, 60% for training and 40% for validation.   
+```{r}
+set.seed(1337)
+inTraining <- createDataPartition(filtered.training$classe, p = .60, list = FALSE)
+training.set <- filtered.training[inTraining,]
+validation.set  <- filtered.training[-inTraining,]
+```
+
+## Applying Machine Learning Algorithm  
+Reproducible controls:  
+```{r}
+fitControl <- trainControl(method = "cv", number = 5)
+set.seed(633)
+```
+
+###Decision Tree Method  
+The first model we tried was the decision tree method with k-fold cross-validation method (5 folds).  
+```{r}
+dtfit <- train(classe ~ ., data = training.set, method = "rpart", trControl = fitControl)
+pred.dt <- predict(dtfit, validation.set)
+dt.result <- confusionMatrix(validation.set$classe, pred.dt)
+dt.result
+```  
+
+Since there are many predictors, we could perhaps reduce matrix dimension using the principle component analysis.    
+```{r}
+pca.dtfit <- train(classe ~ ., data = training.set, method = "rpart", preProcess=c("pca"), trControl = fitControl)
+pred.pcadt <- predict(pca.dtfit, validation.set)
+pcadt.result <- confusionMatrix(validation.set$classe, pred.pcadt)
+pcadt.result
+```
+
+From above results, we observed that decision trees yielded very poor predictions (accuracy were 36.7% and 36.5%).  
+
+### Random Forest Method  
+The nature of random forest is to boostrap many random samples.  Thus, we do not need to apply the k-fold cross-validation method.  
+```{r}
+rffit <- randomForest(training.set[,1:ncol(training.set)-1], training.set[,ncol(training.set)])
+pred.rf <- predict(rffit, validation.set)
+rf.result <- confusionMatrix(validation.set$classe, pred.rf)
+rf.result
+```  
+Testing on the validation set, we saw an accuracy of 99.8%.  This is excellent given that we only trained the model on 60% of the traing set.  
+
+## Final Model and Out of Sample Error  
+From results above, we are confident that the random forest method produce a model that could identify how a barbell lift was performed: with correct form or with 1 of 4 common mistakes.  
+
+The accuracy of our model was 99.7%.  When testing on the testing set (pml-testing.csv):  
+```{r}
+rf.test <- predict(rffit, filtered.testing)
+rf.test
+```  
+From the above results, we are confident that our out of sample error rate is 0.3%.  
+
+##Conclusion  
+In this report, we used random forest algorithm to build model on dataset acquired from accelerometer wore by people performing barbell lift.  We built out model using reinforced training of 55 predictors on the outcome variable "classe".  Our final model obtained a 99.7% accuracy on the total number of testing cases (validation + testing set).  Our report showed that with enough data, it is possible to build model using machine learning to predict how well does one perform physical activity.  
